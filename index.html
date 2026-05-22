@@ -167,17 +167,19 @@
       { length: MEMORY_PHOTO_COUNT },
       (_, index) => `./assets/memories/photo-${String(index + 1).padStart(3, '0')}.jpg`
     );
-    const PLAYER_SPRITE_SOURCE = './image.png';
+    const PLAYER_SPRITE_SOURCE = './player-sprite-green.png';
     const PLAYER_SPRITE_FRAME_COUNT = 5;
     const PLAYER_SPRITE_FRAME_RATE = 9;
     const PLAYER_SPRITE_CROP_Y = 270;
     const PLAYER_SPRITE_CROP_HEIGHT = 480;
     const memoryPhotoCache = new Map();
     const playerSprite = new Image();
+    let playerSpriteSurface = null;
     let playerSpriteReady = false;
 
     if (PLAYER_SPRITE_SOURCE) {
       playerSprite.addEventListener('load', () => {
+        playerSpriteSurface = removeSpriteGreenBackground(playerSprite);
         playerSpriteReady = true;
         draw();
       });
@@ -217,9 +219,10 @@
       player = {
         x: W / 2,
         y: H - 90,
-        r: 22,
+        r: 16,
         speed: 360,
         animationTime: 0,
+        hitboxOffsetY: -28,
       };
       memories = [];
       score = 0;
@@ -310,6 +313,30 @@
       return Math.max(0.72, Math.min(1.58, sourceRatio));
     }
 
+    function removeSpriteGreenBackground(image) {
+      const surface = document.createElement('canvas');
+      const surfaceCtx = surface.getContext('2d', { willReadFrequently: true });
+      surface.width = image.naturalWidth;
+      surface.height = image.naturalHeight;
+      surfaceCtx.drawImage(image, 0, 0);
+
+      const pixels = surfaceCtx.getImageData(0, 0, surface.width, surface.height);
+      const data = pixels.data;
+
+      for (let index = 0; index < data.length; index += 4) {
+        const red = data[index];
+        const green = data[index + 1];
+        const blue = data[index + 2];
+
+        if (green > 170 && green > red * 1.45 && green > blue * 1.45) {
+          data[index + 3] = 0;
+        }
+      }
+
+      surfaceCtx.putImageData(pixels, 0, 0);
+      return surface;
+    }
+
     function update(dt) {
       let move = 0;
 
@@ -357,9 +384,10 @@
 
     function circleRectCollision(circle, rect) {
       const closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.w));
-      const closestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.h));
+      const circleY = circle.y + (circle.hitboxOffsetY || 0);
+      const closestY = Math.max(rect.y, Math.min(circleY, rect.y + rect.h));
       const dx = circle.x - closestX;
-      const dy = circle.y - closestY;
+      const dy = circleY - closestY;
       return dx * dx + dy * dy < circle.r * circle.r;
     }
 
@@ -464,15 +492,15 @@
     }
 
     function drawPlayerSprite() {
-      const frameWidth = playerSprite.naturalWidth / PLAYER_SPRITE_FRAME_COUNT;
+      const frameWidth = playerSpriteSurface.width / PLAYER_SPRITE_FRAME_COUNT;
       const frame = Math.floor(player.animationTime * PLAYER_SPRITE_FRAME_RATE) % PLAYER_SPRITE_FRAME_COUNT;
-      const drawHeight = Math.min(132, H * 0.22);
+      const drawHeight = Math.min(96, H * 0.16);
       const drawWidth = drawHeight * (frameWidth / PLAYER_SPRITE_CROP_HEIGHT);
 
       ctx.save();
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(
-        playerSprite,
+        playerSpriteSurface,
         frame * frameWidth,
         PLAYER_SPRITE_CROP_Y,
         frameWidth,
