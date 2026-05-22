@@ -133,7 +133,7 @@
       <div>BEST: <span id="best">0</span></div>
     </div>
 
-    <div class="hint">PC：← → キー / スマホ：左右にスワイプ</div>
+    <div class="hint">PC：← → キー / スマホ：指で左右に動かす</div>
 
     <div class="start" id="startScreen">
       <div class="card">
@@ -192,8 +192,7 @@
     let gameState = 'start';
     let lastTime = 0;
     let spawnTimer = 0;
-    let touchStartX = null;
-    let touchCurrentX = null;
+    let touchTargetX = null;
 
     bestEl.textContent = best;
 
@@ -315,12 +314,12 @@
       if (keys.ArrowLeft || keys.a) move -= 1;
       if (keys.ArrowRight || keys.d) move += 1;
 
-      if (touchStartX !== null && touchCurrentX !== null) {
-        const diff = touchCurrentX - touchStartX;
-        if (Math.abs(diff) > 8) move += Math.sign(diff);
+      if (touchTargetX !== null) {
+        player.x = touchTargetX;
+      } else {
+        player.x += move * player.speed * dt;
       }
 
-      player.x += move * player.speed * dt;
       player.x = Math.max(player.r + 12, Math.min(W - player.r - 12, player.x));
       player.animationTime += dt;
 
@@ -511,18 +510,25 @@
       keys[e.key] = false;
     });
 
+    function updateTouchTarget(touch) {
+      const rect = canvas.getBoundingClientRect();
+      touchTargetX = touch.clientX - rect.left;
+    }
+
     canvas.addEventListener('touchstart', (e) => {
-      touchStartX = e.touches[0].clientX;
-      touchCurrentX = touchStartX;
+      updateTouchTarget(e.touches[0]);
     }, { passive: true });
 
     canvas.addEventListener('touchmove', (e) => {
-      touchCurrentX = e.touches[0].clientX;
+      updateTouchTarget(e.touches[0]);
     }, { passive: true });
 
-    canvas.addEventListener('touchend', () => {
-      touchStartX = null;
-      touchCurrentX = null;
+    canvas.addEventListener('touchend', (e) => {
+      touchTargetX = e.touches.length ? e.touches[0].clientX - canvas.getBoundingClientRect().left : null;
+    });
+
+    canvas.addEventListener('touchcancel', () => {
+      touchTargetX = null;
     });
 
     startBtn.addEventListener('click', startGame);
