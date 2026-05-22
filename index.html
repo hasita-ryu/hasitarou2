@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>思い出ドリブルゲーム</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #ffffff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #222;
+      overflow: hidden;
+    }
+
+    .wrap {
+      width: min(420px, 100vw);
+      height: min(760px, 100vh);
+      position: relative;
+      border: 1px solid #e8e8e8;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.12);
+      background: #ffffff;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    .ui {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      font-weight: 800;
+      text-shadow: none;
+      z-index: 2;
+    }
+
+    .hint {
+      position: absolute;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      font-size: 13px;
+      opacity: .8;
+      text-align: center;
+      pointer-events: none;
+      color: #666;
+      z-index: 2;
+    }
+
+    .start, .gameover {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(255,255,255,.75);
+      z-index: 4;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 330px;
+      background: white;
+      color: #222;
+      border: 1px solid #ececec;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 18px 48px rgba(0,0,0,.12);
+    }
+
+    h1 {
+      font-size: 28px;
+      line-height: 1.15;
+      margin-bottom: 12px;
+    }
+
+    p {
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 18px;
+      color: #34503b;
+    }
+
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 12px 22px;
+      font-size: 16px;
+      font-weight: 800;
+      color: white;
+      background: #222;
+      cursor: pointer;
+      box-shadow: 0 8px 0 #999;
+    }
+
+    button:active {
+      transform: translateY(4px);
+      box-shadow: 0 4px 0 #12662f;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game"></canvas>
+
+    <div class="ui">
+      <div>SCORE: <span id="score">0</span></div>
+      <div>BEST: <span id="best">0</span></div>
+    </div>
+
+    <div class="hint">PC：← → キー / スマホ：左右にスワイプ</div>
+
+    <div class="start" id="startScreen">
+      <div class="card">
+        <h1>思い出ドリブル</h1>
+        <p>流れてくる思い出写真をよけながら、できるだけ長くドリブルしよう。</p>
+        <button id="startBtn">スタート</button>
+      </div>
+    </div>
+
+    <div class="gameover hidden" id="gameoverScreen">
+      <div class="card">
+        <h1>ゲーム終了</h1>
+        <p>スコア：<span id="finalScore">0</span><br>もう一回ドリブルしてハイスコアを目指そう。</p>
+        <button id="restartBtn">もう一回</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const bestEl = document.getElementById('best');
+    const finalScoreEl = document.getElementById('finalScore');
+    const startScreen = document.getElementById('startScreen');
+    const gameoverScreen = document.getElementById('gameoverScreen');
+    const startBtn = document.getElementById('startBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const MEMORY_PHOTO_COUNT = 115;
+    const MEMORY_PHOTO_SOURCES = Array.from(
+      { length: MEMORY_PHOTO_COUNT },
+      (_, index) => `./assets/memories/photo-${String(index + 1).padStart(3, '0')}.jpg`
+    );
+    const PLAYER_SPRITE_SOURCE = ''; // './assets/player-run-sheet.png'
+    const PLAYER_SPRITE_FRAME_COUNT = 5;
+    const PLAYER_SPRITE_FRAME_RATE = 9;
+    const memoryPhotoCache = new Map();
+    const playerSprite = new Image();
+    let playerSpriteReady = false;
+
+    if (PLAYER_SPRITE_SOURCE) {
+      playerSprite.addEventListener('load', () => {
+        playerSpriteReady = true;
+        draw();
+      });
+      playerSprite.src = PLAYER_SPRITE_SOURCE;
+    }
+
+    let W = 0;
+    let H = 0;
+    let player;
+    let memories = [];
+    let keys = {};
+    let score = 0;
+    let best = Number(localStorage.getItem('memoryDribbleBest') || 0);
+    let gameState = 'start';
+    let lastTime = 0;
+    let spawnTimer = 0;
+    let touchStartX = null;
+    let touchCurrentX = null;
+
+    bestEl.textContent = best;
+
+    function resize() {
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(rect.width * ratio);
+      canvas.height = Math.floor(rect.height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      W = rect.width;
+      H = rect.height;
+
+      if (player) {
+        player.y = H - 90;
+        player.x = Math.max(player.r + 12, Math.min(W - player.r - 12, player.x));
+      }
+    }
+
+    function resetGame() {
+      player = {
+        x: W / 2,
+        y: H - 90,
+        r: 22,
+        speed: 360,
+        animationTime: 0,
+      };
+      memories = [];
+      score = 0;
+      spawnTimer = 0;
+      lastTime = performance.now();
+      scoreEl.textContent = '0';
+    }
+
+    function startGame() {
+      resetGame();
+      gameState = 'playing';
+      startScreen.classList.add('hidden');
+      gameoverScreen.classList.add('hidden');
+      requestAnimationFrame(loop);
+    }
+
+    function endGame() {
+      gameState = 'gameover';
+      finalScoreEl.textContent = Math.floor(score);
+      if (score > best) {
+        best = Math.floor(score);
+        localStorage.setItem('memoryDribbleBest', best);
+        bestEl.textContent = best;
+      }
+      gameoverScreen.classList.remove('hidden');
+    }
+
+    function spawnMemory() {
+      const level = getLevel();
+      const photo = getMemoryPhoto(pick(MEMORY_PHOTO_SOURCES));
+      const size = rand(64, 118 + level * 8);
+      const isWide = level >= 2 && Math.random() < 0.25;
+      const aspectRatio = getPhotoAspectRatio(photo, isWide);
+      const height = size;
+      const width = height * aspectRatio;
+
+      memories.push({
+        x: rand(16, Math.max(17, W - width - 16)),
+        y: -height - 20,
+        w: width,
+        h: height,
+        speed: rand(125, 210) + level * 35,
+        angle: 0,
+        drift: level >= 3 ? rand(-32, 32) : 0,
+        photo,
+      });
+    }
+
+    function getLevel() {
+      if (score > 480) return 4;
+      if (score > 300) return 3;
+      if (score > 165) return 2;
+      if (score > 75) return 1;
+      return 0;
+    }
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function pick(items) {
+      if (!items.length) return null;
+      return items[Math.floor(Math.random() * items.length)];
+    }
+
+    function getMemoryPhoto(src) {
+      if (!src) return null;
+      if (memoryPhotoCache.has(src)) return memoryPhotoCache.get(src);
+
+      const photo = {
+        image: new Image(),
+        ready: false,
+        src,
+      };
+
+      photo.image.addEventListener('load', () => {
+        photo.ready = true;
+      });
+      photo.image.src = src;
+      memoryPhotoCache.set(src, photo);
+      return photo;
+    }
+
+    function getPhotoAspectRatio(photo, isWide) {
+      if (!photo || !photo.ready) return isWide ? rand(1.28, 1.55) : rand(0.82, 1.12);
+
+      const sourceRatio = photo.image.naturalWidth / photo.image.naturalHeight;
+      return Math.max(0.72, Math.min(1.58, sourceRatio));
+    }
+
+    function update(dt) {
+      let move = 0;
+
+      if (keys.ArrowLeft || keys.a) move -= 1;
+      if (keys.ArrowRight || keys.d) move += 1;
+
+      if (touchStartX !== null && touchCurrentX !== null) {
+        const diff = touchCurrentX - touchStartX;
+        if (Math.abs(diff) > 8) move += Math.sign(diff);
+      }
+
+      player.x += move * player.speed * dt;
+      player.x = Math.max(player.r + 12, Math.min(W - player.r - 12, player.x));
+      player.animationTime += dt;
+
+      score += dt * 10;
+      scoreEl.textContent = Math.floor(score);
+
+      spawnTimer -= dt;
+      const level = getLevel();
+      const spawnInterval = Math.max(0.34, 0.95 - level * 0.13 - score * 0.0015);
+      if (spawnTimer <= 0) {
+        spawnMemory();
+        spawnTimer = spawnInterval;
+      }
+
+      for (const m of memories) {
+        m.y += m.speed * dt;
+        m.x += m.drift * dt;
+
+        if (m.x < 10 || m.x + m.w > W - 10) {
+          m.drift *= -1;
+        }
+      }
+
+      memories = memories.filter(m => m.y < H + 160);
+
+      for (const m of memories) {
+        if (circleRectCollision(player, m)) {
+          endGame();
+          break;
+        }
+      }
+    }
+
+    function circleRectCollision(circle, rect) {
+      const closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.w));
+      const closestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.h));
+      const dx = circle.x - closestX;
+      const dy = circle.y - closestY;
+      return dx * dx + dy * dy < circle.r * circle.r;
+    }
+
+    function drawField() {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.strokeStyle = 'rgba(0,0,0,.055)';
+      ctx.lineWidth = 2;
+
+      for (let y = -40; y < H + 80; y += 90) {
+        ctx.beginPath();
+        ctx.moveTo(W / 2, y);
+        ctx.lineTo(W / 2, y + 45);
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = 'rgba(0,0,0,.05)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(W / 2, H * 0.42, 74, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    function drawMemory(m, index) {
+      ctx.save();
+      ctx.translate(m.x + m.w / 2, m.y + m.h / 2);
+      ctx.rotate(m.angle);
+
+      ctx.shadowColor = 'rgba(0, 0, 0, .12)';
+      ctx.shadowBlur = 14;
+      ctx.shadowOffsetY = 7;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-m.w / 2, -m.h / 2, m.w, m.h);
+      ctx.shadowColor = 'transparent';
+
+      if (m.photo && m.photo.ready) {
+        drawPhotoCover(m.photo.image, -m.w / 2 + 7, -m.h / 2 + 7, m.w - 14, m.h - 24);
+      } else {
+        drawPhotoPlaceholder(m, index);
+      }
+
+      ctx.restore();
+    }
+
+    function drawPhotoPlaceholder(m, index) {
+      ctx.fillStyle = index % 3 === 0 ? '#efefef' : index % 3 === 1 ? '#e7e7e7' : '#f4f4f4';
+      ctx.fillRect(-m.w / 2 + 7, -m.h / 2 + 7, m.w - 14, m.h - 24);
+      ctx.fillStyle = '#777';
+      ctx.font = 'bold 13px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText('PHOTO', 0, m.h / 2 - 9);
+    }
+
+    function drawPhotoCover(image, x, y, w, h) {
+      const sourceRatio = image.naturalWidth / image.naturalHeight;
+      const targetRatio = w / h;
+      let sourceX = 0;
+      let sourceY = 0;
+      let sourceW = image.naturalWidth;
+      let sourceH = image.naturalHeight;
+
+      if (sourceRatio > targetRatio) {
+        sourceW = sourceH * targetRatio;
+        sourceX = (image.naturalWidth - sourceW) / 2;
+      } else {
+        sourceH = sourceW / targetRatio;
+        sourceY = (image.naturalHeight - sourceH) / 2;
+      }
+
+      ctx.drawImage(image, sourceX, sourceY, sourceW, sourceH, x, y, w, h);
+    }
+
+    function drawPlayer() {
+      if (playerSpriteReady) {
+        drawPlayerSprite();
+        return;
+      }
+
+      ctx.save();
+      ctx.translate(player.x, player.y);
+
+      ctx.fillStyle = '#202020';
+      ctx.beginPath();
+      ctx.arc(0, 0, player.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, player.r - 4, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, -5, 5, 0, Math.PI * 2);
+      ctx.arc(-6, 6, 4, 0, Math.PI * 2);
+      ctx.arc(7, 6, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawPlayerSprite() {
+      const frameWidth = playerSprite.naturalWidth / PLAYER_SPRITE_FRAME_COUNT;
+      const frameHeight = playerSprite.naturalHeight;
+      const frame = Math.floor(player.animationTime * PLAYER_SPRITE_FRAME_RATE) % PLAYER_SPRITE_FRAME_COUNT;
+      const drawHeight = Math.min(116, H * 0.19);
+      const drawWidth = drawHeight * (frameWidth / frameHeight);
+
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(
+        playerSprite,
+        frame * frameWidth,
+        0,
+        frameWidth,
+        frameHeight,
+        player.x - drawWidth / 2,
+        player.y - drawHeight * 0.78,
+        drawWidth,
+        drawHeight
+      );
+      ctx.restore();
+    }
+
+    function draw() {
+      drawField();
+      memories.forEach(drawMemory);
+      drawPlayer();
+    }
+
+    function loop(now) {
+      if (gameState !== 'playing') return;
+      const dt = Math.min((now - lastTime) / 1000, 0.03);
+      lastTime = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    window.addEventListener('resize', resize);
+
+    window.addEventListener('keydown', (e) => {
+      keys[e.key] = true;
+      if ((e.key === 'Enter' || e.key === ' ') && gameState !== 'playing') startGame();
+    });
+
+    window.addEventListener('keyup', (e) => {
+      keys[e.key] = false;
+    });
+
+    canvas.addEventListener('touchstart', (e) => {
+      touchStartX = e.touches[0].clientX;
+      touchCurrentX = touchStartX;
+    }, { passive: true });
+
+    canvas.addEventListener('touchmove', (e) => {
+      touchCurrentX = e.touches[0].clientX;
+    }, { passive: true });
+
+    canvas.addEventListener('touchend', () => {
+      touchStartX = null;
+      touchCurrentX = null;
+    });
+
+    startBtn.addEventListener('click', startGame);
+    restartBtn.addEventListener('click', startGame);
+
+    resize();
+    resetGame();
+    draw();
+  </script>
+</body>
+</html>
