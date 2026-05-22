@@ -167,9 +167,11 @@
       { length: MEMORY_PHOTO_COUNT },
       (_, index) => `./assets/memories/photo-${String(index + 1).padStart(3, '0')}.jpg`
     );
-    const PLAYER_SPRITE_SOURCE = ''; // './assets/player-run-sheet.png'
+    const PLAYER_SPRITE_SOURCE = './image.png';
     const PLAYER_SPRITE_FRAME_COUNT = 5;
     const PLAYER_SPRITE_FRAME_RATE = 9;
+    const PLAYER_SPRITE_CROP_Y = 270;
+    const PLAYER_SPRITE_CROP_HEIGHT = 480;
     const memoryPhotoCache = new Map();
     const playerSprite = new Image();
     let playerSpriteReady = false;
@@ -463,21 +465,20 @@
 
     function drawPlayerSprite() {
       const frameWidth = playerSprite.naturalWidth / PLAYER_SPRITE_FRAME_COUNT;
-      const frameHeight = playerSprite.naturalHeight;
       const frame = Math.floor(player.animationTime * PLAYER_SPRITE_FRAME_RATE) % PLAYER_SPRITE_FRAME_COUNT;
-      const drawHeight = Math.min(116, H * 0.19);
-      const drawWidth = drawHeight * (frameWidth / frameHeight);
+      const drawHeight = Math.min(132, H * 0.22);
+      const drawWidth = drawHeight * (frameWidth / PLAYER_SPRITE_CROP_HEIGHT);
 
       ctx.save();
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(
         playerSprite,
         frame * frameWidth,
-        0,
+        PLAYER_SPRITE_CROP_Y,
         frameWidth,
-        frameHeight,
+        PLAYER_SPRITE_CROP_HEIGHT,
         player.x - drawWidth / 2,
-        player.y - drawHeight * 0.78,
+        player.y - drawHeight * 0.84,
         drawWidth,
         drawHeight
       );
